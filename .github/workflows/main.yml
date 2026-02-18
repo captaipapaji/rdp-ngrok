@@ -18,12 +18,11 @@ jobs:
     - name: Enable RDP + Create Admin User
       shell: powershell
       run: |
-        Write-Host "Enabling RDP..."
         Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' fDenyTSConnections 0
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
         if (-not $env:RDP_PASS) {
-          Write-Error "RDP_PASS secret missing!"
+          Write-Error "RDP_PASS secret missing"
           exit 1
         }
 
@@ -36,8 +35,6 @@ jobs:
           Add-LocalGroupMember -Group Administrators -Member $env:RDP_USER
         }
 
-        Write-Host "RDP ready."
-
     - name: Install Ngrok
       shell: powershell
       run: |
@@ -48,7 +45,8 @@ jobs:
     - name: Start Ngrok Tunnel
       shell: powershell
       run: |
-        Start-Process .\ngrok\ngrok.exe "tcp 3389 --log=stdout" -WindowStyle Hidden
+        # IMPORTANT: --inspect=true enables port 4040
+        Start-Process .\ngrok\ngrok.exe "tcp 3389 --inspect=true" -WindowStyle Hidden
 
         Write-Host "Waiting for ngrok..."
 
@@ -66,7 +64,7 @@ jobs:
         }
 
         if (-not $url) {
-          Write-Error "Ngrok tunnel not created."
+          Write-Error "Ngrok tunnel not created"
           exit 1
         }
 
