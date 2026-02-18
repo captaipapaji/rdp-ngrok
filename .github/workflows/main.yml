@@ -1,80 +1,25 @@
-name: Windows - Ngrok RDP
+name: rdp
 
-on:
-  workflow_dispatch:
-
-env:
-  NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-  RDP_USER: admin
-  RDP_PASS: ${{ secrets.RDP_PASS }}
+on: [push, workflow_dispatch]
 
 jobs:
-  rdp:
-    runs-on: windows-latest
-    timeout-minutes: 360
+build:
 
-    steps:
+runs-on: windows-latest
 
-    - name: Enable RDP + Create User
-      shell: powershell
-      run: |
-        Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' fDenyTSConnections 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-
-        if (-not $env:RDP_PASS) { exit 1 }
-
-        $pass = ConvertTo-SecureString $env:RDP_PASS -AsPlainText -Force
-
-        if (Get-LocalUser admin -ErrorAction SilentlyContinue) {
-          Set-LocalUser admin -Password $pass
-        } else {
-          New-LocalUser admin -Password $pass
-          Add-LocalGroupMember Administrators admin
-        }
-
-    - name: Install Ngrok
-      shell: powershell
-      run: |
-        Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
-        Expand-Archive ngrok.zip
-        .\ngrok\ngrok.exe config add-authtoken $env:NGROK_AUTH_TOKEN
-
-    - name: Start Ngrok + Get RDP Address
-      shell: powershell
-      run: |
-        Start-Process .\ngrok\ngrok.exe "tcp 3389 --log=ngrok.log" -WindowStyle Hidden
-
-        Write-Host "Waiting for tunnel..."
-
-        $addr = $null
-
-        for ($i=0; $i -lt 40; $i++) {
-          Start-Sleep 5
-          if (Test-Path ngrok.log) {
-            $line = Select-String "tcp://" ngrok.log | Select -Last 1
-            if ($line) {
-              $addr = ($line -split "tcp://")[1].Trim()
-              break
-            }
-          }
-        }
-
-        if (-not $addr) {
-          Write-Error "Tunnel not found"
-          exit 1
-        }
-
-        Write-Host ""
-        Write-Host "=============================="
-        Write-Host "RDP ADDRESS : $addr"
-        Write-Host "USERNAME    : admin"
-        Write-Host "PASSWORD    : $env:RDP_PASS"
-        Write-Host "=============================="
-        Write-Host ""
-
-    - name: Keep Alive
-      shell: powershell
-      run: |
-        for ($i=0; $i -lt 72; $i++) {
-          Start-Sleep 300
-        }
+steps:
+- name: Download
+run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+- name: Extract
+run: Expand-Archive ngrok.zip
+- name: Auth
+run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
+env:
+NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+- name: Enable TS
+run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+- run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+- run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+- run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+- name: Create Tunnel
+run: .\ngrok\ngrok.exe tcp 3389
