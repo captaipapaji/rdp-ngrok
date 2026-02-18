@@ -15,24 +15,21 @@ jobs:
 
     steps:
 
-    - name: Enable RDP + Create Admin User
+    - name: Enable RDP + Create User
       shell: powershell
       run: |
         Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' fDenyTSConnections 0
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-        if (-not $env:RDP_PASS) {
-          Write-Error "RDP_PASS secret missing"
-          exit 1
-        }
+        if (-not $env:RDP_PASS) { exit 1 }
 
         $pass = ConvertTo-SecureString $env:RDP_PASS -AsPlainText -Force
 
-        if (Get-LocalUser -Name $env:RDP_USER -ErrorAction SilentlyContinue) {
-          Set-LocalUser -Name $env:RDP_USER -Password $pass
+        if (Get-LocalUser admin -ErrorAction SilentlyContinue) {
+          Set-LocalUser admin -Password $pass
         } else {
-          New-LocalUser -Name $env:RDP_USER -Password $pass -PasswordNeverExpires
-          Add-LocalGroupMember -Group Administrators -Member $env:RDP_USER
+          New-LocalUser admin -Password $pass
+          Add-LocalGroupMember Administrators admin
         }
 
     - name: Install Ngrok
@@ -42,48 +39,42 @@ jobs:
         Expand-Archive ngrok.zip
         .\ngrok\ngrok.exe config add-authtoken $env:NGROK_AUTH_TOKEN
 
-    - name: Start Ngrok Tunnel
+    - name: Start Ngrok + Get RDP Address
       shell: powershell
       run: |
-        # IMPORTANT: --inspect=true enables port 4040
-        Start-Process .\ngrok\ngrok.exe "tcp 3389 --inspect=true" -WindowStyle Hidden
+        Start-Process .\ngrok\ngrok.exe "tcp 3389 --log=ngrok.log" -WindowStyle Hidden
 
-        Write-Host "Waiting for ngrok..."
+        Write-Host "Waiting for tunnel..."
 
-        $url = $null
+        $addr = $null
 
         for ($i=0; $i -lt 40; $i++) {
           Start-Sleep 5
-          try {
-            $data = Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
-            $url = ($data.tunnels | Where proto -eq "tcp").public_url
-            if ($url) { break }
-          } catch {
-            Write-Host "Ngrok not ready..."
+          if (Test-Path ngrok.log) {
+            $line = Select-String "tcp://" ngrok.log | Select -Last 1
+            if ($line) {
+              $addr = ($line -split "tcp://")[1].Trim()
+              break
+            }
           }
         }
 
-        if (-not $url) {
-          Write-Error "Ngrok tunnel not created"
+        if (-not $addr) {
+          Write-Error "Tunnel not found"
           exit 1
         }
 
-        $url = $url -replace "tcp://",""
-
         Write-Host ""
         Write-Host "=============================="
-        Write-Host "RDP ADDRESS : $url"
-        Write-Host "USERNAME    : $env:RDP_USER"
+        Write-Host "RDP ADDRESS : $addr"
+        Write-Host "USERNAME    : admin"
         Write-Host "PASSWORD    : $env:RDP_PASS"
         Write-Host "=============================="
         Write-Host ""
 
-    - name: Keep Alive (6 Hours)
+    - name: Keep Alive
       shell: powershell
       run: |
         for ($i=0; $i -lt 72; $i++) {
           Start-Sleep 300
-          if (-not (Get-Process ngrok -ErrorAction SilentlyContinue)) {
-            exit 1
-          }
         }
